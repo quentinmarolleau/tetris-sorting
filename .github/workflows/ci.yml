@@ -1,0 +1,101 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Every job installs from uv.lock as it stands; whether the lock matches
+# pyproject.toml is the `lock` job's question alone, so a stale lock fails
+# there instead of in every job at once.
+env:
+  UV_FROZEN: "1"
+
+jobs:
+  lock:
+    name: Lockfile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Check uv.lock against pyproject.toml
+        run: env -u UV_FROZEN uv lock --check
+
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv run ruff check --output-format=github
+
+  format:
+    name: Format (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv run ruff format --check
+
+  types:
+    name: Types (basedpyright)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --all-groups
+      - run: uv run basedpyright
+
+  test:
+    name: Tests (Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.13", "3.14", "3.15"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: ${{ matrix.python }}
+      - run: uv sync --all-groups
+      - run: uv run pytest --cov=tetris --cov-report=term-missing --cov-fail-under=95
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv build
+      # the wheel carries the package and its metadata, nothing else
+      - name: Check the wheel's contents
+        shell: python
+        run: |
+          import glob, re, zipfile
+          names = zipfile.ZipFile(glob.glob("dist/*.whl")[0]).namelist()
+          print("\n".join(names))
+          allowed = re.compile(r"tetris/[a-z_]+\.py|tetris_sorting-[^/]+\.dist-info/.+")
+          stray = [name for name in names if not allowed.fullmatch(name)]
+          assert names and not stray, f"unexpected files in the wheel: {stray}"
+      - name: Import the installed wheel
+        run: |
+          uv run --isolated --no-project --with dist/*.whl \
+            python -c "import tetris; print(tetris.__all__)"
