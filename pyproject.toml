@@ -1,6 +1,6 @@
 [project]
 name = "tetris-sorting"
-version = "0.1.0"
+version = "1.0.0"
 description = "The Tetris rearrangement algorithm of Wang et al. 2023 for optical tweezer arrays, with its success-rate and rearrangement-cost benchmarks."
 readme = "README.md"
 license = "MIT"
